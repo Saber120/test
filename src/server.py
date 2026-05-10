@@ -42,6 +42,8 @@ KEEP_ALIVE = os.environ.get("KEEP_ALIVE", "60m")
 PORT = int(os.environ.get("PORT", "8000"))
 OLLAMA_BASE_URL = "http://localhost:11434"
 
+VERBOSE_LOG = os.environ.get("VERBOSE_LOG", "True").lower() in ("true", "1", "yes")
+
 request_semaphore = asyncio.Semaphore(MAX_CONCURRENT)
 http_client = None
 
@@ -67,6 +69,8 @@ def log_request(req_id, method, path, status, duration, tokens_in, tokens_out, e
     _print_request_line(entry)
 
 def _print_request_line(entry):
+    if not VERBOSE_LOG:
+        return
     status_color = "\033[0;32m" if entry["status"] == 200 else "\033[0;31m"
     reset = "\033[0m"
     line = (

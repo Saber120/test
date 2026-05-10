@@ -25,6 +25,7 @@ NUM_GPU=-1
 KEEP_ALIVE="60m"
 PORT=8000
 DEBUG_MODE=False
+VERBOSE_LOG=True
 
 if [ -f "$CONFIG_FILE" ]; then
     echo -e "${CYAN}📄 Loading config from $CONFIG_FILE${NC}"
@@ -43,6 +44,7 @@ while [[ $# -gt 0 ]]; do
         --keep-alive)     KEEP_ALIVE="$2"; shift 2 ;;
         --port)           PORT="$2"; shift 2 ;;
         --debug)          DEBUG_MODE=True; shift ;;
+        --verbose-log)    VERBOSE_LOG="$2"; shift 2 ;;
         --help)
             echo "Usage: bash start.sh [OPTIONS]"
             echo ""
@@ -57,6 +59,8 @@ while [[ $# -gt 0 ]]; do
             echo "  --keep-alive <dur>    Keep model loaded (default: 60m)"
             echo "  --port <n>            Server port (default: 8000)"
             echo "  --debug               Enable verbose logging"
+            echo "  --verbose-log <bool>    Show request log in terminal (default: True)"
+            echo "  --help"
             exit 0
             ;;
         *) echo -e "${RED}Unknown option: $1${NC}"; exit 1 ;;
@@ -64,7 +68,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 export MODEL_NAME MAX_CONCURRENT NUM_CTX NUM_PREDICT NUM_BATCH
-export FLASH_ATTN NUM_GPU KEEP_ALIVE PORT DEBUG_MODE
+export FLASH_ATTN NUM_GPU KEEP_ALIVE PORT DEBUG_MODE VERBOSE_LOG
 
 clear
 echo ""
