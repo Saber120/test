@@ -2,11 +2,6 @@
 #
 # Kaggle Ollama Gateway — Main Launcher
 #
-# Usage:
-#   bash start.sh                          # Use config/settings.env
-#   bash start.sh --model qwen3:8b         # Override model
-#   bash start.sh --model qwen3:8b --max-concurrent 2
-#
 
 set -e
 
@@ -14,12 +9,12 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
+BOLD='\033[1m'
 NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="$SCRIPT_DIR/config/settings.env"
 
-# ---- Defaults ----
 MODEL_NAME="qwen3:8b"
 MAX_CONCURRENT=1
 NUM_CTX=68768
@@ -31,13 +26,11 @@ KEEP_ALIVE="60m"
 PORT=8000
 DEBUG_MODE=False
 
-# ---- Load config ----
 if [ -f "$CONFIG_FILE" ]; then
     echo -e "${CYAN}📄 Loading config from $CONFIG_FILE${NC}"
     source "$CONFIG_FILE"
 fi
 
-# ---- Parse CLI args ----
 while [[ $# -gt 0 ]]; do
     case $1 in
         --model)          MODEL_NAME="$2"; shift 2 ;;
@@ -73,30 +66,33 @@ done
 export MODEL_NAME MAX_CONCURRENT NUM_CTX NUM_PREDICT NUM_BATCH
 export FLASH_ATTN NUM_GPU KEEP_ALIVE PORT DEBUG_MODE
 
+clear
 echo ""
-echo -e "${GREEN}╔════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║   Kaggle Ollama Gateway — Starting             ║${NC}"
-echo -e "${GREEN}╠════════════════════════════════════════════════╣${NC}"
-echo -e "${GREEN}║  Model:      ${CYAN}$MODEL_NAME${NC}                     ${GREEN}║${NC}"
-echo -e "${GREEN}║  Concurrent: ${CYAN}$MAX_CONCURRENT${NC}                      ${GREEN}║${NC}"
-echo -e "${GREEN}║  Context:    ${CYAN}$NUM_CTX${NC}                      ${GREEN}║${NC}"
-echo -e "${GREEN}║  Port:       ${CYAN}$PORT${NC}                       ${GREEN}║${NC}"
-echo -e "${GREEN}╚════════════════════════════════════════════════╝${NC}"
+echo -e "${BOLD}${GREEN}  ██╗      ██████╗  █████╗ ██████╗ ██╗   ██╗███████╗██████╗ ${NC}"
+echo -e "${BOLD}${GREEN}  ██║     ██╔═══██╗██╔══██╗██╔══██╗██║   ██║██╔════╝██╔══██╗${NC}"
+echo -e "${BOLD}${GREEN}  ██║     ██║   ██║███████║██████╔╝██║   ██║█████╗  ██████╔╝${NC}"
+echo -e "${BOLD}${GREEN}  ██║     ██║   ██║██╔══██║██╔═══╝ ██║   ██║██╔══╝  ██╔══██╗${NC}"
+echo -e "${BOLD}${GREEN}  ███████╗╚██████╔╝██║  ██║██║     ╚██████╔╝███████╗██║  ██║${NC}"
+echo -e "${BOLD}${GREEN}  ╚══════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝      ╚═════╝ ╚══════╝╚═╝  ╚═╝${NC}"
+echo -e "${BOLD}${CYAN}                    Gateway${NC}"
+echo ""
+echo -e "  ${YELLOW}Model:${NC}      ${BOLD}$MODEL_NAME${NC}"
+echo -e "  ${YELLOW}Concurrent:${NC} ${BOLD}$MAX_CONCURRENT${NC}"
+echo -e "  ${YELLOW}Context:${NC}    ${BOLD}$NUM_CTX${NC}"
+echo -e "  ${YELLOW}Port:${NC}       ${BOLD}$PORT${NC}"
 echo ""
 
-# ---- Step 1: Setup ----
-echo -e "${YELLOW}⚙️  Step 1/4: Installing dependencies...${NC}"
+# Step 1
+echo -e "${YELLOW}[1/4]${NC} Installing dependencies..."
 bash "$SCRIPT_DIR/scripts/setup.sh"
 
-# ---- Step 2: Install model ----
-echo -e "${YELLOW}⚙️  Step 2/4: Preparing Ollama & model...${NC}"
+# Step 2
+echo -e "${YELLOW}[2/4]${NC} Preparing Ollama & model..."
 bash "$SCRIPT_DIR/scripts/install_model.sh"
 
-# ---- Step 3: Start server ----
-echo -e "${YELLOW}⚙️  Step 3/4: Starting FastAPI server...${NC}"
+# Step 3
+echo -e "${YELLOW}[3/4]${NC} Starting FastAPI server..."
 cd "$SCRIPT_DIR"
-
-# Kill any leftover server
 pkill -f "src.server" 2>/dev/null || true
 fuser -k "${PORT}/tcp" 2>/dev/null || true
 sleep 1
@@ -105,26 +101,25 @@ python3 -m src.server > /tmp/gateway-server.log 2>&1 &
 SERVER_PID=$!
 echo "  Server PID: $SERVER_PID"
 
-# Wait for server to actually respond
-echo "  Waiting for server to be ready..."
+echo -n "  Waiting for server"
 READY=0
 for i in $(seq 1 30); do
     sleep 2
+    printf "."
     if curl -s -o /dev/null -w "%{http_code}" "http://localhost:${PORT}/v1/models" 2>/dev/null | grep -q "200"; then
         READY=1
         break
     fi
 done
-
 if [ "$READY" -ne 1 ]; then
-    echo -e "${RED}  ❌ Server failed to start${NC}"
-    echo "  Last log lines:"
+    echo ""
+    echo -e "  ${RED}❌ Server failed to start${NC}"
     tail -20 /tmp/gateway-server.log 2>/dev/null
     kill $SERVER_PID 2>/dev/null || true
     exit 1
 fi
-echo -e "${GREEN}  ✅ Server is ready${NC}"
+echo -e "${GREEN}✅${NC}"
 
-# ---- Step 4: Tunnel ----
-echo -e "${YELLOW}⚙️  Step 4/4: Creating Cloudflare tunnel...${NC}"
+# Step 4
+echo -e "${YELLOW}[4/4]${NC} Creating Cloudflare tunnel..."
 bash "$SCRIPT_DIR/scripts/tunnel.sh"
