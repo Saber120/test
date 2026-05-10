@@ -47,6 +47,10 @@ VERBOSE_LOG = os.environ.get("VERBOSE_LOG", "True").lower() in ("true", "1", "ye
 # Request log file — tail this to see live requests
 REQUEST_LOG_FILE = os.environ.get("REQUEST_LOG_FILE", "/tmp/gateway-requests.log")
 
+# Create log file immediately so tail -f can attach
+with open(REQUEST_LOG_FILE, "w") as _init_f:
+    _init_f.write("")
+
 request_semaphore = asyncio.Semaphore(MAX_CONCURRENT)
 http_client = None
 
@@ -91,7 +95,7 @@ def _format_request_line(entry):
     line += "\n  └─"
     return line
 
-_print_to_stdout = False  # Turned on by --verbose-log via env
+_print_to_stdout = VERBOSE_LOG  # Mirror env flag
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

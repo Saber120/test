@@ -98,6 +98,11 @@ if [ -n "$PUBLIC_URL" ]; then
     if [ "${VERBOSE_LOG}" = "True" ] || [ "${VERBOSE_LOG}" = "true" ]; then
         echo ""
         echo -e "${GREEN}─── Request Log (live) ───${NC}"
+        # Wait for server to create the log file
+        for _wait in $(seq 1 15); do
+            if [ -f /tmp/gateway-requests.log ]; then break; fi
+            sleep 1
+        done
         tail -f /tmp/gateway-requests.log
     else
         # Keep script alive silently
