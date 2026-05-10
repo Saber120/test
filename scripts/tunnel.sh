@@ -9,36 +9,55 @@ echo "  ├─ Killing old tunnels..."
 pkill -f cloudflared 2>/dev/null || true
 sleep 1
 
-PUBLIC_URL=""
-FAIL_COUNT=0
+PORT="${PORT:-8000}"
+URL_FILE="/tmp/kaggle-ollama-url.txt"
+rm -f "$URL_FILE"
 
-start_tunnel() {
-    echo "  ├─ Starting Cloudflare tunnel..."
-    ./cloudflared tunnel --url "http://localhost:${PORT:-8000}" 2>&1 | while IFS= read -r line; do
-        if echo "$line" | grep -q "trycloudflare.com"; then
-            URL=$(echo "$line" | grep -oP 'https://[a-zA-Z0-9\-]+\.trycloudflare\.com')
-            if [ -n "$URL" ]; then
-                echo "$URL" > /tmp/kaggle-ollama-url.txt
-                echo ""
-                echo "  ✅ Tunnel active!"
-                echo "  └─ $URL"
-                return 0
-            fi
-        fi
-    done
-    return 1
-}
+# ---- Health check: wait for server ----
+echo "  ├─ Waiting for server on port $PORT..."
+SERVER_READY=0
+for i in $(seq 1 30); do
+    if curl -s -o /dev/null -w "%{http_code}" "http://localhost:$PORT/v1/models" 2>/dev/null | grep -qE "200|429"; then
+        SERVER_READY=1
+        break
+    fi
+    sleep 2
+done
 
-echo "  ├─ Waiting for tunnel URL (up to 60s)..."
-./cloudflared tunnel --url "http://localhost:${PORT:-8000}" &
+if [ "$SERVER_READY" -ne 1 ]; then
+    echo "  ❌ Server not responding on port $PORT after 60s"
+    echo "  Check: curl http://localhost:$PORT/v1/models"
+    exit 1
+fi
+echo "  ✅ Server is responding"
+
+# ---- Start tunnel and capture URL ----
+echo "  ├─ Starting Cloudflare tunnel..."
+
+./cloudflared tunnel --url "http://localhost:${PORT}" > /tmp/cloudflared.log 2>&1 &
 TUNNEL_PID=$!
+sleep 2
 
+if ! kill -0 $TUNNEL_PID 2>/dev/null; then
+    echo "  ❌ cloudflared failed to start"
+    cat /tmp/cloudflared.log
+    exit 1
+fi
+
+# Wait for URL in logs
 TIMEOUT=60
 ELAPSED=0
+PUBLIC_URL=""
+
 while [ $ELAPSED -lt $TIMEOUT ]; do
-    if [ -f /tmp/kaggle-ollama-url.txt ]; then
-        PUBLIC_URL=$(cat /tmp/kaggle-ollama-url.txt)
-        break
+    if [ -f /tmp/cloudflared.log ]; then
+        # Extract URL from cloudflared log
+        FOUND_URL=$(grep -oP 'https://[a-zA-Z0-9\-]+\.trycloudflare\.com' /tmp/cloudflared.log 2>/dev/null | tail -1)
+        if [ -n "$FOUND_URL" ]; then
+            PUBLIC_URL="$FOUND_URL"
+            echo "$FOUND_URL" > "$URL_FILE"
+            break
+        fi
     fi
     sleep 2
     ELAPSED=$((ELAPSED + 2))
@@ -46,26 +65,24 @@ done
 
 if [ -n "$PUBLIC_URL" ]; then
     echo ""
-    echo "╔═══════════════════════════════════════════════════════╗"
-    echo "║         🎉  KAGGLE OLLAMA GATEWAY IS READY  🎉       ║"
-    echo "╠═══════════════════════════════════════════════════════╣"
-    echo "║  Public API:                                       ║"
-    echo "║  $PUBLIC_URL/v1"
-    echo "║  Model: $MODEL_NAME"
-    echo "║                                                   ║"
-    echo "║  Example:                                          ║"
-    echo "║  curl $PUBLIC_URL/v1/chat/completions \\"
-    echo "║    -H 'Content-Type: application/json' \\"
-    echo "║    -d '{'model':'$MODEL_NAME','messages':..."
-    echo "╚═══════════════════════════════════════════════════════╝"
+    echo "╔═══════════════════════════════════════════════════════════╗"
+    echo "║         🎉  KAGGLE OLLAMA GATEWAY IS READY  🎉          ║"
+    echo "╠═══════════════════════════════════════════════════════════╣"
+    echo "║  Public API:                                            ║"
+    echo "║  ${PUBLIC_URL}/v1                                        ║"
+    echo "║  Model: ${MODEL_NAME:-qwen3:8b}                                       ║"
+    echo "║                                                         ║"
+    echo "║  Test it:                                               ║"
+    echo "║  curl ${PUBLIC_URL}/v1/models                               ║"
+    echo "╚═══════════════════════════════════════════════════════════╝"
     echo ""
 
-    # Watchdog
+    # Watchdog — restart tunnel if it dies
     while true; do
         if ! kill -0 $TUNNEL_PID 2>/dev/null; then
             echo "⚠️  Tunnel died, restarting in 10s..."
             sleep 10
-            ./cloudflared tunnel --url "http://localhost:${PORT:-8000}" &
+            ./cloudflared tunnel --url "http://localhost:${PORT}" > /tmp/cloudflared.log 2>&1 &
             TUNNEL_PID=$!
             sleep 5
         fi
@@ -73,7 +90,8 @@ if [ -n "$PUBLIC_URL" ]; then
     done
 else
     echo "❌ Failed to get tunnel URL within ${TIMEOUT}s"
-    echo "   Check Kaggle internet: ping -c 1 trycloudflare.com"
+    echo "   Log output:"
+    cat /tmp/cloudflared.log 2>/dev/null | tail -20
     kill $TUNNEL_PID 2>/dev/null || true
     exit 1
 fi
