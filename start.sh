@@ -102,7 +102,7 @@ if [ "$VERBOSE_LOG" = "True" ] || [ "$VERBOSE_LOG" = "true" ]; then
     echo -e "  ${DIM}[verbose-log enabled — request log appears after tunnel setup]${NC}"
 fi
 
-echo -n "  ${DIM}Waiting for server${NC}"
+echo -ne "  ${DIM}Waiting for server${NC}"
 READY=0
 for i in $(seq 1 60); do
     sleep 2
