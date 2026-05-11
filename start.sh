@@ -101,7 +101,7 @@ pkill -f "src.server" 2>/dev/null || true
 fuser -k "${PORT}/tcp" 2>/dev/null || true
 sleep 1
 
-python3 -m src.server &
+python3 -m src.server > /tmp/gateway-server.log 2>&1 &
 SERVER_PID=$!
 echo "  Server PID: $SERVER_PID"
 
@@ -112,7 +112,7 @@ fi
 
 echo -n "  Waiting for server"
 READY=0
-for i in $(seq 1 30); do
+for i in $(seq 1 60); do
     sleep 2
     printf "."
     if curl -s -o /dev/null -w "%{http_code}" "http://localhost:${PORT}/v1/models" 2>/dev/null | grep -q "200"; then
@@ -123,7 +123,8 @@ done
 if [ "$READY" -ne 1 ]; then
     echo ""
     echo -e "  ${RED}❌ Server failed to start${NC}"
-    tail -20 /tmp/gateway-server.log 2>/dev/null
+    echo -e "  ${YELLOW}Last 30 lines of server log:${NC}"
+    tail -30 /tmp/gateway-server.log 2>/dev/null
     kill $SERVER_PID 2>/dev/null || true
     exit 1
 fi
