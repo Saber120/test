@@ -86,17 +86,30 @@ if [ -n "$PUBLIC_URL" ]; then
         done
     ) &
 
+    # ── Banner ──
+    WIDTH=64
+    TOP="$(printf '╔═%.0s' $(seq 1 $WIDTH) | sed 's/═/═/g')╗"
+    DIV="$(printf '╠═%.0s' $(seq 1 $WIDTH) | sed 's/═/═/g')╣"
+    BOT="$(printf '╚═%.0s' $(seq 1 $WIDTH) | sed 's/═/═/g')╝"
+    EMPTY="$(printf '║ %-62s ║\n' '')"
+
+    ENDPOINT_LINE="$(printf '║ %-62s ║\n' "  ${CYAN}${BOLD}Endpoint:${DIM}  ${YELLOW}${PUBLIC_URL}/v1")"
+    MODEL_LINE="$(printf '║ %-62s ║\n' "  ${CYAN}${BOLD}Model:${DIM}     ${GREEN}${MODEL_NAME:-qwen3:8b}")"
+    PORT_LINE="$(printf '║ %-62s ║\n' "  ${CYAN}${BOLD}Port:${DIM}      ${WHITE}${PORT:-8000}")"
+    CURL_CMD="$(printf '║ %-62s ║\n' "  ${DIM}curl ${YELLOW}${PUBLIC_URL}/v1/models")"
+    TITLE="$(printf '║ %-62s ║\n' "              ${GREEN}${BOLD}🔥  RAGNAROK IS ONLINE  🔥")"
+
     echo ""
-    echo -e "${MAGENTA}${BOLD}  ╔══════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${MAGENTA}${BOLD}  ║${GREEN}${BOLD}              🔥  RAGNAROK IS ONLINE  🔥              ${MAGENTA}║${NC}"
-    echo -e "${MAGENTA}${BOLD}  ╠══════════════════════════════════════════════════════════╣${NC}"
-    echo -e "${MAGENTA}${BOLD}  ║${NC}${CYAN}${BOLD}  Endpoint:${DIM}  ${YELLOW}${PUBLIC_URL}/v1                                   ║${NC}"
-    echo -e "${MAGENTA}${BOLD}  ║${NC}${CYAN}${BOLD}  Model:${DIM}     ${GREEN}${MODEL_NAME:-qwen3:8b}                                              ║${NC}"
-    echo -e "${MAGENTA}${BOLD}  ║${NC}${CYAN}${BOLD}  Port:${DIM}      ${WHITE}${PORT:-8000}                                              ║${NC}"
-    echo -e "${MAGENTA}${BOLD}  ╠══════════════════════════════════════════════════════════╣${NC}"
-    echo -e "${MAGENTA}${BOLD}  ║${NC}                                                         ║${NC}"
-    echo -e "${MAGENTA}${BOLD}  ║${NC}${DIM}  curl ${YELLOW}${PUBLIC_URL}/v1/models${NC}                                  ║${NC}"
-    echo -e "${MAGENTA}${BOLD}  ╚══════════════════════════════════════════════════════════╝${NC}"
+    echo -e "${MAGENTA}${BOLD}${TOP}${NC}"
+    echo -e "${MAGENTA}${BOLD}${TITLE}${NC}"
+    echo -e "${MAGENTA}${BOLD}${DIV}${NC}"
+    echo -e "${MAGENTA}${BOLD}${ENDPOINT_LINE}${NC}"
+    echo -e "${MAGENTA}${BOLD}${MODEL_LINE}${NC}"
+    echo -e "${MAGENTA}${BOLD}${PORT_LINE}${NC}"
+    echo -e "${MAGENTA}${BOLD}${DIV}${NC}"
+    echo -e "${MAGENTA}${BOLD}${EMPTY}${NC}"
+    echo -e "${MAGENTA}${BOLD}${CURL_CMD}${NC}"
+    echo -e "${MAGENTA}${BOLD}${BOT}${NC}"
     echo ""
 
     # If verbose-log enabled, tail the request log live in the cell
