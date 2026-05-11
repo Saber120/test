@@ -58,6 +58,41 @@ http_client = None
 MAX_LOG_ENTRIES = 50
 request_log = []
 
+def _status_color(code):
+    if code < 300:
+        return "\033[0;32m"
+    if code == 429:
+        return "\033[0;33m"
+    if code < 500:
+        return "\033[0;31m"
+    return "\033[0;35m"
+
+def _status_label(code):
+    if code < 300:
+        return "OK"
+    if code == 429:
+        return "Busy"
+    if code == 400:
+        return "Bad"
+    if code < 500:
+        return "Err"
+    return "Fatal"
+
+def log_request_start(req_id, method, path, extra=""):
+    line = (
+        f"\033[0;36m[{time.strftime('%H:%M:%S')}]\033[0m "
+        f"\033[0;90m◀\033[0m "
+        f"\033[1m{req_id}\033[0m "
+        f"{method} {path}"
+    )
+    if extra:
+        line += f"  \033[0;90m({extra})\033[0m"
+    if _print_to_stdout:
+        print(line, flush=True)
+    with open(REQUEST_LOG_FILE, "a") as f:
+        f.write(line + "\n")
+        f.flush()
+
 def log_request(req_id, method, path, status, duration, tokens_in, tokens_out, extra=""):
     entry = {
         "id": req_id,
@@ -73,33 +108,41 @@ def log_request(req_id, method, path, status, duration, tokens_in, tokens_out, e
     request_log.append(entry)
     if len(request_log) > MAX_LOG_ENTRIES:
         request_log.pop(0)
-    line = _format_request_line(entry)
-    # Print to both stdout (for direct python runs) and log file
+    color = _status_color(status)
+    label = _status_label(status)
+    line = (
+        f"\033[0;36m[{entry['time']}]\033[0m "
+        f"\033[0;90m▶\033[0m "
+        f"\033[1m{entry['id']}\033[0m "
+        f"{color}{status} {label}\033[0m "
+        f"{entry['duration']}s "
+        f"\033[0;90mt:{entry['t_in']}→{entry['t_out']}\033[0m"
+    )
+    if entry['extra']:
+        line += f"  \033[0;33m{entry['extra']}\033[0m"
     if _print_to_stdout:
         print(line, flush=True)
     with open(REQUEST_LOG_FILE, "a") as f:
         f.write(line + "\n")
         f.flush()
 
-def _format_request_line(entry):
-    status_color = "\033[0;32m" if entry["status"] == 200 else "\033[0;31m"
-    reset = "\033[0m"
-    line = (
-        f"\n  ┌─ {entry['time']} | {entry['method']} {entry['path']}"
-        f"\n  │  Status: {status_color}{entry['status']}{reset}  "
-        f"Duration: {entry['duration']}s  "
-        f"Tokens: {entry['t_in']}→{entry['t_out']}"
-    )
-    if entry["extra"]:
-        line += f"  │  {entry['extra']}"
-    line += "\n  └─"
-    return line
-
 _print_to_stdout = VERBOSE_LOG  # Mirror env flag
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global http_client
+    banner = (
+        f"\n"
+        f"{'='*60}\n"
+        f"  \033[1m\033[0;32mKaggle Ollama Gateway\033[0m\n"
+        f"{'='*60}\n"
+        f"  \033[0;90mModel:\033[0m     {MODEL_NAME}\n"
+        f"  \033[0;90mPort:\033[0m      {PORT}\n"
+        f"  \033[0;90mConcurrent:\033[0m {MAX_CONCURRENT}\n"
+        f"  \033[0;90mContext:\033[0m   {NUM_CTX}\n"
+        f"{'='*60}\n"
+    )
+    print(banner, flush=True)
     logger.info("FastAPI starting up...")
     http_client = httpx.AsyncClient(
         timeout=httpx.Timeout(connect=60.0, read=900.0, write=60.0, pool=900.0),
@@ -171,6 +214,8 @@ async def openai_completions(request: Request):
     request_id = uuid.uuid4().hex[:8]
     start_time = time.monotonic()
 
+    log_request_start(request_id, "POST", "/v1/chat/completions")
+
     if request_semaphore.locked():
         logger.warning(f"[{request_id}] Rejected: busy")
         log_request(request_id, "POST", "/v1/chat/completions", 429, 0, 0, 0, "RATE_LIMITED")
@@ -221,15 +266,15 @@ async def openai_completions(request: Request):
     async with request_semaphore:
         if not is_client_streaming:
             result = await handle_non_stream(
-                request_id, ollama_url, ollama_payload, start_time
+                request, request_id, ollama_url, ollama_payload, start_time
             )
         else:
             result = handle_stream(
-                request_id, ollama_url, ollama_payload, start_time
+                request, request_id, ollama_url, ollama_payload, start_time
             )
         return result
 
-async def handle_non_stream(request_id, ollama_url, ollama_payload, start_time):
+async def handle_non_stream(request, request_id, ollama_url, ollama_payload, start_time):
     content_parts = []
     thinking_parts = []
     all_tool_calls = []
@@ -250,6 +295,12 @@ async def handle_non_stream(request_id, ollama_url, ollama_payload, start_time):
                 )
 
             async for line in response.aiter_lines():
+                if await request.is_disconnected():
+                    elapsed = round(time.monotonic() - start_time, 2)
+                    logger.warning(f"[{request_id}] Client disconnected during non-stream")
+                    log_request(request_id, "POST", "/v1/chat/completions", 499, elapsed, 0, 0, "CLIENT_DISCONNECTED")
+                    return JSONResponse(status_code=499, content={"error": "Client disconnected"})
+
                 if not line.strip():
                     continue
                 data = _json_loads(line)
@@ -302,12 +353,13 @@ async def handle_non_stream(request_id, ollama_url, ollama_payload, start_time):
         },
     })
 
-def handle_stream(request_id, ollama_url, ollama_payload, start_time):
+def handle_stream(request, request_id, ollama_url, ollama_payload, start_time):
     async def stream_generator():
         first_chunk = True
         has_tool_calls = False
         prompt_tokens = 0
         completion_tokens = 0
+        client_disconnected = False
 
         try:
             async with http_client.stream(
@@ -324,6 +376,13 @@ def handle_stream(request_id, ollama_url, ollama_payload, start_time):
                     return
 
                 async for line in response.aiter_lines():
+                    if await request.is_disconnected():
+                        client_disconnected = True
+                        logger.warning(f"[{request_id}] Client disconnected during stream")
+                        elapsed = round(time.monotonic() - start_time, 2)
+                        log_request(request_id, "POST", "/v1/chat/completions", 499, elapsed, 0, completion_tokens, "CLIENT_DISCONNECTED")
+                        return
+
                     if not line.strip():
                         continue
 
@@ -387,7 +446,8 @@ def handle_stream(request_id, ollama_url, ollama_payload, start_time):
             pass
         finally:
             elapsed = round(time.monotonic() - start_time, 2)
-            log_request(request_id, "POST", "/v1/chat/completions", 200, elapsed, prompt_tokens, completion_tokens, "STREAM")
+            if not client_disconnected:
+                log_request(request_id, "POST", "/v1/chat/completions", 200, elapsed, prompt_tokens, completion_tokens, "STREAM")
             logger.info(f"[{request_id}] Done {elapsed}s | P:{prompt_tokens} C:{completion_tokens}")
             yield b"data: [DONE]\n\n"
 
